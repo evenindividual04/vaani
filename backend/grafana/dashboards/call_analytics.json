@@ -1,0 +1,102 @@
+{
+  "description": "Vaani call volume, outcomes, channels, languages, latency trends",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"color": {"fixedColor": "#14B8A6", "mode": "fixed"}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum(vaani_active_calls)", "refId": "A"}],
+      "title": "Active Calls",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "increase(vaani_calls_total[1h])", "legendFormat": "Calls/hr", "refId": "A"}],
+      "title": "Calls Last 1h",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "targets": [{"expr": "histogram_quantile(0.95, rate(vaani_pipeline_total_latency_ms_bucket[5m]))", "refId": "A"}],
+      "title": "P95 Pipeline Latency",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "targets": [{"expr": "rate(vaani_fallback_triggered_total[1h]) / rate(vaani_calls_total[1h])", "refId": "A"}],
+      "title": "Fallback Rate 1h",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "id": 5,
+      "targets": [{"expr": "increase(vaani_calls_total[1h])", "legendFormat": "{{channel}} / {{outcome}}", "refId": "A"}],
+      "title": "Calls per Hour by Channel & Outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "id": 6,
+      "options": {"pieType": "pie", "legend": {"displayMode": "list", "placement": "right"}},
+      "targets": [{"expr": "sum by (outcome) (vaani_calls_total)", "legendFormat": "{{outcome}}", "refId": "A"}],
+      "title": "Call Outcome Distribution",
+      "type": "piechart"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 12},
+      "id": 7,
+      "options": {"pieType": "donut"},
+      "targets": [{"expr": "sum by (channel) (vaani_calls_total)", "legendFormat": "{{channel}}", "refId": "A"}],
+      "title": "Channel Distribution",
+      "type": "piechart"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 12},
+      "id": 8,
+      "options": {"pieType": "donut"},
+      "targets": [{"expr": "sum by (language) (vaani_calls_total)", "legendFormat": "{{language}}", "refId": "A"}],
+      "title": "Language Distribution",
+      "type": "piechart"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 12},
+      "id": 9,
+      "targets": [
+        {"expr": "histogram_quantile(0.95, rate(vaani_pipeline_total_latency_ms_bucket[5m]))", "legendFormat": "P95 Total", "refId": "A"},
+        {"expr": "histogram_quantile(0.50, rate(vaani_pipeline_total_latency_ms_bucket[5m]))", "legendFormat": "P50 Total", "refId": "B"}
+      ],
+      "title": "Pipeline Latency Trend",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["vaani", "calls"],
+  "time": {"from": "now-6h", "to": "now"},
+  "title": "Vaani — Call Analytics",
+  "uid": "vaani-calls",
+  "version": 1
+}

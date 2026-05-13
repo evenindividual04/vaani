@@ -1,0 +1,43 @@
+{
+  "description": "Vaani FNOL completeness distribution, per-field extraction rates",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"bucketSize": "auto", "fillOpacity": 80},
+      "targets": [{"expr": "sum by (le) (vaani_fnol_completeness_score_bucket)", "legendFormat": "completeness ≤ {{le}}", "refId": "A"}],
+      "title": "FNOL Completeness Score Distribution",
+      "type": "histogram"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "histogram_quantile(0.50, rate(vaani_fnol_completeness_score_bucket[1h]))", "legendFormat": "Completeness P50", "refId": "A"}],
+      "title": "FNOL Completeness P50 Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [{"expr": "increase(vaani_calls_total{outcome='complete'}[1h]) / increase(vaani_calls_total[1h])", "legendFormat": "Completion Rate — {{channel}}", "refId": "A"}],
+      "title": "FNOL Completion Rate by Channel",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["vaani", "fnol"],
+  "time": {"from": "now-24h", "to": "now"},
+  "title": "Vaani — FNOL Accuracy",
+  "uid": "vaani-fnol",
+  "version": 1
+}

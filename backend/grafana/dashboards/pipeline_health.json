@@ -1,0 +1,170 @@
+{
+  "annotations": {"list": []},
+  "description": "Vaani STT/LLM/TTS pipeline health — latency, circuit breakers, fallback rate",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "ms"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(vaani_stt_latency_ms_bucket[5m]))",
+          "legendFormat": "STT P50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(vaani_stt_latency_ms_bucket[5m]))",
+          "legendFormat": "STT P95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(vaani_stt_latency_ms_bucket[5m]))",
+          "legendFormat": "STT P99",
+          "refId": "C"
+        }
+      ],
+      "title": "STT Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "ms"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(vaani_llm_latency_ms_bucket[5m]))",
+          "legendFormat": "LLM P50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(vaani_llm_latency_ms_bucket[5m]))",
+          "legendFormat": "LLM P95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(vaani_llm_ttft_ms_bucket[5m]))",
+          "legendFormat": "TTFT P50",
+          "refId": "C"
+        }
+      ],
+      "title": "LLM Latency & TTFT (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "ms"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(vaani_tts_latency_ms_bucket[5m]))",
+          "legendFormat": "TTS P50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(vaani_tts_latency_ms_bucket[5m]))",
+          "legendFormat": "TTS P95",
+          "refId": "B"
+        }
+      ],
+      "title": "TTS Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "percentunit"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "rate(vaani_fallback_triggered_total[5m]) / rate(vaani_calls_total[5m])",
+          "legendFormat": "Fallback Rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Fallback Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"options": {"0": {"color": "red", "text": "DISABLED"}, "0.5": {"color": "orange", "text": "COOLING"}, "1": {"color": "green", "text": "HEALTHY"}}, "type": "value"}
+          ],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red"}, {"color": "orange", "value": 0.4}, {"color": "green", "value": 0.9}]}
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16},
+      "id": 5,
+      "targets": [{"expr": "vaani_provider_health{stage='stt'}", "legendFormat": "{{provider}}", "refId": "A"}],
+      "title": "STT Provider Health",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red"}, {"color": "orange", "value": 0.4}, {"color": "green", "value": 0.9}]}
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 16},
+      "id": 6,
+      "targets": [{"expr": "vaani_provider_health{stage='llm'}", "legendFormat": "{{provider}}", "refId": "A"}],
+      "title": "LLM Provider Health",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red"}, {"color": "orange", "value": 0.4}, {"color": "green", "value": 0.9}]}
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 16},
+      "id": 7,
+      "targets": [{"expr": "vaani_provider_health{stage='tts'}", "legendFormat": "{{provider}}", "refId": "A"}],
+      "title": "TTS Provider Health",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 16},
+      "id": 8,
+      "targets": [{"expr": "vaani_circuit_breaker_opens_total", "legendFormat": "{{provider}}", "refId": "A"}],
+      "title": "Circuit Breaker Opens",
+      "type": "stat"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["vaani", "pipeline"],
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "Vaani — Pipeline Health",
+  "uid": "vaani-pipeline",
+  "version": 1
+}
