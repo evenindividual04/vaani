@@ -1,8 +1,11 @@
 """LLM clients: GroqLLM (primary) + GeminiLLM (fallback) + LLMRouter, per §1d."""
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
+
+_SENTENCE_END = re.compile(r"[।.!?]+\s*")
 
 import structlog
 
@@ -42,6 +45,7 @@ class GroqLLM:
             error_threshold=settings.CB_ERROR_THRESHOLD,
             cooldown_seconds=settings.CB_COOLDOWN_SECONDS,
             disable_threshold=settings.CB_DISABLE_THRESHOLD,
+            recovery_seconds=settings.CB_RECOVERY_SECONDS,
         )
 
     async def complete(
@@ -110,6 +114,53 @@ class GroqLLM:
             log.error("llm_groq_failed", call_id=call_id, error=str(exc))
             raise
 
+    async def stream_sentences(self, messages: list[dict], call_id: str = ""):
+        """Yield complete sentences from the streaming token output."""
+        if not self.circuit_breaker.is_available():
+            raise RuntimeError("groq circuit breaker is open")
+
+        start = time.perf_counter()
+        buffer = ""
+
+        try:
+            stream = await self.client.chat.completions.create(
+                model=settings.GROQ_MODEL,
+                messages=messages,
+                stream=True,
+                temperature=0.3,
+                max_tokens=512,
+            )
+
+            async for chunk in stream:
+                token = chunk.choices[0].delta.content or ""
+                buffer += token
+                while True:
+                    m = _SENTENCE_END.search(buffer)
+                    if not m:
+                        break
+                    sentence = buffer[: m.end()].strip()
+                    buffer = buffer[m.end() :]
+                    if sentence:
+                        yield sentence
+
+            if buffer.strip():
+                yield buffer.strip()
+
+            latency_ms = (time.perf_counter() - start) * 1000
+            self.circuit_breaker.record_success()
+            update_provider_health("groq", "llm", "healthy")
+            LLM_LATENCY.labels(provider="groq", model=settings.GROQ_MODEL).observe(latency_ms)
+            log.info("llm_stream_complete", call_id=call_id, latency_ms=round(latency_ms, 1))
+
+        except Exception as exc:
+            self.circuit_breaker.record_failure()
+            update_provider_health("groq", "llm", self.circuit_breaker.state.value)
+            PROVIDER_ERRORS.labels(
+                stage="llm", provider="groq", error_type=type(exc).__name__
+            ).inc()
+            log.error("llm_groq_stream_failed", call_id=call_id, error=str(exc))
+            raise
+
 
 class GeminiLLM:
     """Fallback LLM — Google Gemini Flash."""
@@ -124,6 +175,7 @@ class GeminiLLM:
             error_threshold=settings.CB_ERROR_THRESHOLD,
             cooldown_seconds=settings.CB_COOLDOWN_SECONDS,
             disable_threshold=settings.CB_DISABLE_THRESHOLD,
+            recovery_seconds=settings.CB_RECOVERY_SECONDS,
         )
 
     async def complete(
@@ -198,6 +250,22 @@ class LLMRouter:
 
         FALLBACKS_TRIGGERED.labels(stage="llm", from_provider="groq", to_provider="gemini").inc()
         return await self.fallback.complete(messages, call_id, purpose)
+
+    async def stream_sentences(self, messages: list[dict], call_id: str = ""):
+        """Yield sentences: Groq streaming primary, Gemini complete() fallback."""
+        if self.primary.circuit_breaker.is_available():
+            try:
+                async for sentence in self.primary.stream_sentences(messages, call_id):
+                    yield sentence
+                return
+            except Exception as exc:
+                log.warning("llm_primary_stream_failed_using_fallback", error=str(exc))
+
+        FALLBACKS_TRIGGERED.labels(stage="llm", from_provider="groq", to_provider="gemini").inc()
+        result = await self.fallback.complete(messages, call_id)
+        from app.pipeline.tts import split_into_sentences
+        for sentence in split_into_sentences(result.text):
+            yield sentence
 
     @property
     def groq_cb(self) -> CircuitBreaker:

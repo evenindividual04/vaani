@@ -57,6 +57,7 @@ class SarvamTTS:
             error_threshold=settings.CB_ERROR_THRESHOLD,
             cooldown_seconds=settings.CB_COOLDOWN_SECONDS,
             disable_threshold=settings.CB_DISABLE_THRESHOLD,
+            recovery_seconds=settings.CB_RECOVERY_SECONDS,
         )
 
     async def synthesize_parallel(
@@ -129,6 +130,28 @@ class SarvamTTS:
             latency_ms=latency_ms,
             sentence_count=len(sentences),
         )
+
+    async def synthesize_one_async(self, text: str, language_code: str) -> bytes:
+        """Single-sentence async TTS for streaming pipeline; returns silence on failure."""
+        if not self.circuit_breaker.is_available():
+            return generate_silence_wav(500)
+        try:
+            resp = await self.async_client.text_to_speech.convert(
+                text=text,
+                target_language_code=language_code,
+                speaker=settings.SARVAM_TTS_SPEAKER,
+                model=settings.SARVAM_TTS_MODEL,
+            )
+            self.circuit_breaker.record_success()
+            update_provider_health("sarvam", "tts", "healthy")
+            return base64.b64decode(resp.audios[0])
+        except Exception as exc:
+            self.circuit_breaker.record_failure()
+            PROVIDER_ERRORS.labels(
+                stage="tts", provider="sarvam", error_type=type(exc).__name__
+            ).inc()
+            log.warning("tts_one_failed", error=str(exc))
+            return generate_silence_wav(500)
 
     def synthesize_single(self, text: str, language_code: str) -> bytes:
         """Synchronous single sentence synthesis (for greeting on Twilio connect)."""

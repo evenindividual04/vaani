@@ -52,11 +52,15 @@ class Settings(BaseSettings):
     CB_ERROR_THRESHOLD: int = 3
     CB_COOLDOWN_SECONDS: int = 60
     CB_DISABLE_THRESHOLD: int = 3
+    CB_RECOVERY_SECONDS: int = 600  # DISABLED → COOLING_DOWN self-recovery after 10 min
 
     # Rate limiting
     RATE_LIMIT_API: str = "100/minute"
     RATE_LIMIT_CALLS: str = "30/minute"
     RATE_LIMIT_AUTH: str = "10/minute"
+
+    # Webhooks
+    FNOL_WEBHOOK_URL: str = ""
 
     # Frontend
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import audioop
 import base64
 import json
 import time
@@ -20,13 +21,26 @@ from app.domain.language import LanguageTracker
 from app.domain.prompts.loader import get_prompt
 from app.pipeline.audio import AudioBuffer, send_audio_to_twilio
 from app.pipeline.metrics import ACTIVE_CALLS, CALLS_TOTAL
-from app.pipeline.orchestrator import PipelineOrchestrator
+from app.pipeline.orchestrator import PipelineOrchestrator, PipelineTurnResult
+from app.pipeline.vad import SileroVAD
 
 log = structlog.get_logger()
 router = APIRouter(tags=["twilio"])
 
 # In-memory orchestrators per active Twilio call (keyed by stream_sid)
 _active_calls: dict[str, dict] = {}
+
+_vad: SileroVAD | None = None
+
+
+def _get_vad() -> SileroVAD | None:
+    global _vad
+    if _vad is None:
+        try:
+            _vad = SileroVAD()
+        except Exception:
+            pass
+    return _vad
 
 
 @router.post("/voice/incoming")
@@ -79,6 +93,7 @@ async def twilio_stream(ws: WebSocket):
     fsm = ConversationFSM()
     lang_tracker = LanguageTracker()
     audio_buffer = AudioBuffer()
+    vad = _get_vad()
 
     call_id: str | None = None
     stream_sid: str | None = None
@@ -130,12 +145,20 @@ async def twilio_stream(ws: WebSocket):
                 payload = message.get("media", {}).get("payload", "")
                 flushed = audio_buffer.add_twilio_chunk(payload)
 
+                # VAD-gated early flush: if we have ≥300ms and current chunk is silence, flush now
+                if not flushed and vad and audio_buffer.should_flush_on_silence():
+                    mulaw_bytes = base64.b64decode(payload)
+                    pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
+                    if not vad.is_speech(pcm_8k, sample_rate=8000):
+                        flushed = audio_buffer.flush()
+
                 if flushed:
                     try:
                         system_prompt = get_prompt(
                             fsm.current_prompt_key, settings.ACTIVE_PROMPT_VERSION, fsm.language
                         )
-                        result = await orchestrator.run_turn(
+                        result: PipelineTurnResult | None = None
+                        async for item in orchestrator.run_turn_streaming(
                             audio_wav=flushed,
                             text_input=None,
                             conversation_history=fsm.history,
@@ -143,16 +166,23 @@ async def twilio_stream(ws: WebSocket):
                             language=fsm.language,
                             system_prompt=system_prompt,
                             channel="phone",
-                        )
+                        ):
+                            if isinstance(item, bytes):
+                                await send_audio_to_twilio(ws, stream_sid, item)
+                            else:
+                                result = item
+
+                        if result is None:
+                            continue
+
                         fsm.language = lang_tracker.update(result.language, result.transcript)
                         fsm.add_turn("user", result.transcript)
                         fsm.add_turn("agent", result.response_text)
+
+                        # FNOL extraction runs AFTER audio delivered
                         fnol_data.update(await extractor.extract(fsm.history, call_id))
                         fsm.advance(fnol_data)
                         turn_index += 1
-
-                        for wav_chunk in result.audio_chunks:
-                            await send_audio_to_twilio(ws, stream_sid, wav_chunk)
 
                         if fsm.is_complete:
                             break
