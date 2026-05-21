@@ -83,3 +83,11 @@ htmlcov/
 .vscode/
 .idea/
 *.swp
+
+# SQLite databases
+*.db
+*.sqlite
+
+# Internal spec/planning docs
+VAANI_COMPLETE_SPEC.md
+vaani-complete-spec-md-*.md

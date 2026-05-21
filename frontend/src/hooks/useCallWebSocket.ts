@@ -4,6 +4,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useCallStore } from "@/store/callStore";
 import { getAuthToken } from "@/lib/api";
+import { isRealtimeMode } from "@/hooks/useRealtimeMode";
 import type { WSMessage } from "@/lib/types";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
@@ -15,6 +16,7 @@ export function useCallWebSocket() {
   const handleWSMessage = useCallStore((s) => s.handleWSMessage);
 
   const connect = useCallback(() => {
+    if (!isRealtimeMode()) return;
     const token = getAuthToken();
     if (!token) return;
 

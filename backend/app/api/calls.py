@@ -6,7 +6,7 @@ from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user, require_scope
@@ -70,15 +70,19 @@ async def list_calls(
     channel: str | None = None,
     language: str | None = None,
     outcome: str | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_scope("read")),
 ):
+    effective_from = from_date or date_from
+    effective_to = to_date or date_to
     store = CallStore(db)
     calls, total = await store.list_calls(
         page=page, page_size=page_size, channel=channel,
-        language=language, outcome=outcome, date_from=date_from, date_to=date_to,
+        language=language, outcome=outcome, date_from=effective_from, date_to=effective_to,
     )
     return {
         "items": [_serialize_call_summary(c) for c in calls],
@@ -211,6 +215,30 @@ async def get_call_replay(
         "per_turn_metrics": per_turn_metrics,
         "final_fnol": _serialize_fnol(call.fnol_record),
     }
+
+
+@router.get("/{call_id}/fnol/export")
+async def export_fnol_record(
+    call_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_scope("read")),
+):
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.storage.models import CallRecord
+
+    result = await db.execute(
+        select(CallRecord)
+        .options(selectinload(CallRecord.fnol_record))
+        .where(CallRecord.call_id == call_id)
+    )
+    call = result.scalar_one_or_none()
+    if not call or not call.fnol_record:
+        raise HTTPException(status_code=404, detail="FNOL record not found")
+
+    payload = _serialize_fnol(call.fnol_record)
+    headers = {"Content-Disposition": f"attachment; filename=fnol_{call_id}.json"}
+    return JSONResponse(content=payload, headers=headers)
 
 
 @router.delete("/{call_id}", status_code=204)

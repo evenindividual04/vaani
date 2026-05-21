@@ -1,4 +1,4 @@
-version: "3.9"
+version: '3.8'
 
 services:
   backend:
@@ -8,18 +8,21 @@ services:
       target: production
     ports:
       - "8000:8000"
-    env_file: .env
-    volumes:
-      - audio_artifacts:/app/audio_artifacts
-      - ./backend/app/domain/prompts/templates:/app/app/domain/prompts/templates
-    depends_on:
-      - prometheus
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=redis://redis:6379
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
@@ -31,40 +34,61 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_WS_URL=ws://localhost:8000
+      - NODE_ENV=production
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   prometheus:
-    image: prom/prometheus:v2.51.0
+    image: prom/prometheus:latest
     ports:
       - "9090:9090"
     volumes:
       - ./backend/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.retention.time=15d'
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   grafana:
-    image: grafana/grafana:10.4.0
+    image: grafana/grafana:latest
     ports:
       - "3001:3000"
     volumes:
-      - grafana_data:/var/lib/grafana
       - ./backend/grafana/provisioning:/etc/grafana/provisioning
       - ./backend/grafana/dashboards:/var/lib/grafana/dashboards
     environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_AUTH_DISABLE_LOGIN_FORM=false
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-volumes:
-  audio_artifacts:
-  prometheus_data:
-  grafana_data:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

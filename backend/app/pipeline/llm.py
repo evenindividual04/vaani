@@ -242,6 +242,15 @@ class LLMRouter:
         call_id: str = "",
         purpose: str = "conversation",
     ) -> LLMResult:
+        from app.api.config import get_llm_provider_override
+        override = get_llm_provider_override()
+
+        if override == "groq":
+            return await self.primary.complete(messages, call_id, purpose)
+        if override == "gemini":
+            return await self.fallback.complete(messages, call_id, purpose)
+
+        # auto: Groq primary with Gemini fallback
         if self.primary.circuit_breaker.is_available():
             try:
                 return await self.primary.complete(messages, call_id, purpose)

@@ -13,7 +13,7 @@ const FILTER_OPTIONS = {
   Language: { key: "language", options: ["", "hi-IN", "en-IN"] },
 };
 
-type Filters = { channel: string; outcome: string; language: string };
+type Filters = { channel: string; outcome: string; language: string; from_date: string; to_date: string };
 
 function FilterPill({
   label,
@@ -51,12 +51,14 @@ function FilterPill({
 export default function CallsPage() {
   const router = useRouter();
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<Filters>({ channel: "", outcome: "", language: "" });
+  const [filters, setFilters] = useState<Filters>({ channel: "", outcome: "", language: "", from_date: "", to_date: "" });
 
   const params: Record<string, string | number> = { page, page_size: 20 };
   if (filters.channel)  params.channel  = filters.channel;
   if (filters.outcome)  params.outcome  = filters.outcome;
   if (filters.language) params.language = filters.language;
+  if (filters.from_date) params.from_date = filters.from_date;
+  if (filters.to_date) params.to_date = filters.to_date;
 
   const qs = new URLSearchParams(
     Object.entries(params).map(([k, v]) => [k, String(v)])
@@ -93,7 +95,7 @@ export default function CallsPage() {
         <div className="flex items-center gap-2">
           {activeFilterCount > 0 && (
             <button
-              onClick={() => { setFilters({ channel: "", outcome: "", language: "" }); setPage(1); }}
+              onClick={() => { setFilters({ channel: "", outcome: "", language: "", from_date: "", to_date: "" }); setPage(1); }}
               className="btn-ghost text-[11px]"
             >
               Clear filters ({activeFilterCount})
@@ -116,6 +118,36 @@ export default function CallsPage() {
             onChange={setFilter(key as keyof Filters)}
           />
         ))}
+        <div className="flex items-center gap-2 rounded-lg overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+          <span
+            className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider"
+            style={{ background: "rgba(255,255,255,0.04)", color: "#4A5568", borderRight: "1px solid rgba(255,255,255,0.07)" }}
+          >
+            From
+          </span>
+          <input
+            type="date"
+            value={filters.from_date}
+            onChange={(e) => setFilter("from_date")(e.target.value)}
+            className="input-dark border-0 rounded-none focus:ring-0 text-[11px]"
+            style={{ background: "transparent", paddingLeft: 8 }}
+          />
+        </div>
+        <div className="flex items-center gap-2 rounded-lg overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+          <span
+            className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider"
+            style={{ background: "rgba(255,255,255,0.04)", color: "#4A5568", borderRight: "1px solid rgba(255,255,255,0.07)" }}
+          >
+            To
+          </span>
+          <input
+            type="date"
+            value={filters.to_date}
+            onChange={(e) => setFilter("to_date")(e.target.value)}
+            className="input-dark border-0 rounded-none focus:ring-0 text-[11px]"
+            style={{ background: "transparent", paddingLeft: 8 }}
+          />
+        </div>
       </div>
 
       {/* Table */}

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 
 from app.config import settings
-from app.storage.database import init_db
+from app.storage.database import init_db, engine
 from app.storage.models import PromptVersion
 
 
@@ -68,6 +68,9 @@ async def lifespan(app: FastAPI):
     await seed_initial_prompt_version()
     log.info("vaani_started", environment=settings.ENVIRONMENT)
     yield
+    from app.channels.websocket_handler import live_manager
+    await live_manager.close_all()
+    await engine.dispose()
     log.info("vaani_shutdown")
 
 

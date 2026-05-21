@@ -1,8 +1,21 @@
 """Shared pytest fixtures for all Vaani tests."""
 from __future__ import annotations
 
+import os
+
+# Override settings before app is imported so tests use predictable credentials
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("ADMIN_USERNAME", "admin")
+os.environ.setdefault("ADMIN_PASSWORD", "admin")
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-tests-only")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("SARVAM_API_KEY", "test-key")
+os.environ.setdefault("GROQ_API_KEY", "test-key")
+os.environ.setdefault("GOOGLE_API_KEY", "test-key")
+
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
@@ -35,12 +48,22 @@ async def test_client(db_session: AsyncSession):
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    transport = httpx.ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def clear_revoked_tokens():
+    """Clear the in-memory token revocation set between tests."""
+    from app.api.auth import _revoked_tokens
+    _revoked_tokens.clear()
+    yield
+    _revoked_tokens.clear()
+
 
 @pytest_asyncio.fixture
 async def auth_headers(test_client: AsyncClient):
@@ -57,19 +80,17 @@ async def auth_headers(test_client: AsyncClient):
 
 @pytest.fixture
 def mock_sarvam_stt(monkeypatch):
-    """Mock SarvamAI STT to avoid real API calls."""
+    """Mock AsyncSarvamAI STT to avoid real API calls (STT uses async client)."""
+    from unittest.mock import AsyncMock
     fake_response = MagicMock()
     fake_response.transcript = "यह एक टेस्ट ट्रांसक्रिप्ट है"
     fake_response.language_code = "hi-IN"
     fake_response.time_taken = 0.1
 
     mock_client = MagicMock()
-    mock_client.speech_to_text.transcribe.return_value = fake_response
+    mock_client.speech_to_text.transcribe = AsyncMock(return_value=fake_response)
 
-    monkeypatch.setattr(
-        "app.pipeline.stt.SarvamAI",
-        lambda **kwargs: mock_client,
-    )
+    monkeypatch.setattr("sarvamai.AsyncSarvamAI", lambda **kwargs: mock_client)
     return mock_client
 
 
@@ -79,11 +100,7 @@ def mock_groq(monkeypatch):
 
     async def fake_stream(*args, **kwargs):
         class FakeChunk:
-            class choices:
-                class delta:
-                    content = "Mock agent response."
-
-                choices = [type("c", (), {"delta": type("d", (), {"content": "Mock agent response."})()})()]
+            choices = [type("c", (), {"delta": type("d", (), {"content": "Mock agent response."})()})()]
 
         class FakeStream:
             async def __aiter__(self):
@@ -93,10 +110,8 @@ def mock_groq(monkeypatch):
 
     mock_client = MagicMock()
     mock_client.chat.completions.create = AsyncMock(side_effect=fake_stream)
-    monkeypatch.setattr(
-        "app.pipeline.llm.AsyncGroq",
-        lambda **kwargs: mock_client,
-    )
+    # Patch at source package — AsyncGroq is imported lazily inside __init__
+    monkeypatch.setattr("groq.AsyncGroq", lambda **kwargs: mock_client)
     return mock_client
 
 
@@ -106,7 +121,6 @@ def mock_sarvam_tts(monkeypatch):
     import base64
 
     fake_response = MagicMock()
-    # Generate a tiny valid WAV (44 bytes header + silence)
     fake_response.audios = [base64.b64encode(b"\x00" * 100).decode()]
 
     mock_async_client = MagicMock()
@@ -115,12 +129,7 @@ def mock_sarvam_tts(monkeypatch):
     mock_sync_client = MagicMock()
     mock_sync_client.text_to_speech.convert.return_value = fake_response
 
-    def make_clients(**kwargs):
-        return mock_sync_client
-
-    def make_async_clients(**kwargs):
-        return mock_async_client
-
-    monkeypatch.setattr("app.pipeline.tts.SarvamAI", make_clients)
-    monkeypatch.setattr("app.pipeline.tts.AsyncSarvamAI", make_async_clients)
+    # Patch at source package — both are imported lazily inside __init__
+    monkeypatch.setattr("sarvamai.SarvamAI", lambda **kwargs: mock_sync_client)
+    monkeypatch.setattr("sarvamai.AsyncSarvamAI", lambda **kwargs: mock_async_client)
     return mock_async_client

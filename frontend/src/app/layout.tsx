@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
-import { Sidebar } from "@/components/layout/Sidebar";
+import { AuthGuard } from "@/components/AuthGuard";
+import { AppShell } from "@/components/layout/AppShell";
+import { DevToolbar } from "@/components/DevToolbar";
 
 export const metadata: Metadata = {
   title: "Vaani — FNOL Operations",
@@ -22,12 +24,12 @@ export default function RootLayout({
       <body
         className="min-h-screen bg-[#0A0A0A] text-[#FAFAFA]"
       >
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 overflow-auto bg-[#0A0A0A]">
+        <AuthGuard>
+          <AppShell>
             {children}
-          </main>
-        </div>
+          </AppShell>
+          <DevToolbar />
+        </AuthGuard>
       </body>
     </html>
   );

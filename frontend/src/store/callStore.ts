@@ -107,7 +107,7 @@ export const useCallStore = create<CallStore>((set, get) => ({
             text: msg.text,
             language: msg.language,
             timestamp_ms: msg.timestamp_ms,
-            fsm_state: call.fsm_state as any,
+            fsm_state: msg.fsm_state,
           };
           return {
             liveCalls: {
@@ -146,9 +146,9 @@ export const useCallStore = create<CallStore>((set, get) => ({
             llm_ttft_ms: msg.llm_ttft_ms,
             tts_ms: msg.tts_ms,
             total_ms: msg.total_ms,
-            stt_provider: "sarvam",
-            llm_provider: "groq",
-            tts_provider: "sarvam",
+            stt_provider: msg.stt_provider,
+            llm_provider: msg.llm_provider,
+            tts_provider: msg.tts_provider,
             fallback_triggered: msg.fallback_triggered,
           };
           return {

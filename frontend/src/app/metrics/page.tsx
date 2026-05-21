@@ -53,6 +53,22 @@ function RadialScore({ value, max = 100, color }: { value: number; max?: number;
 export default function MetricsPage() {
   const { data, isLoading } = useSWR("/diagnostics", swrFetcher, { refreshInterval: 10000 });
   const typedData = data as DiagnosticsData | undefined;
+  const pipelineProviders = typedData?.pipeline
+    ? {
+        [`STT · ${typedData.pipeline.stt.provider}`]: {
+          status: typedData.pipeline.stt.status,
+          consecutive_errors: typedData.pipeline.stt.consecutive_errors ?? 0,
+        },
+        [`LLM · ${typedData.pipeline.llm.provider}`]: {
+          status: typedData.pipeline.llm.status,
+          consecutive_errors: typedData.pipeline.llm.consecutive_errors ?? 0,
+        },
+        [`TTS · ${typedData.pipeline.tts.provider}`]: {
+          status: typedData.pipeline.tts.status,
+          consecutive_errors: typedData.pipeline.tts.consecutive_errors ?? 0,
+        },
+      }
+    : typedData?.providers ?? {};
 
   const completionPct  = Math.round((typedData?.fnol_completion_rate_1h ?? 0) * 100);
   const fallbackPct    = Math.round((typedData?.fallback_rate_1h ?? 0) * 100);
@@ -189,7 +205,7 @@ export default function MetricsPage() {
 
           {/* ── Provider Health + Grafana ─────────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ProviderHealthCard providers={typedData?.providers ?? {}} />
+            <ProviderHealthCard providers={pipelineProviders} />
 
             {/* Grafana links */}
             <div

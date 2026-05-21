@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 
 import structlog
+import httpx
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.config import settings
@@ -47,6 +48,14 @@ class LiveMonitorManager:
                 dead.append(ws)
         for ws in dead:
             self.disconnect(ws)
+
+    async def close_all(self) -> None:
+        for ws in list(self.connections):
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        self.connections = []
 
 
 live_manager = LiveMonitorManager()
@@ -233,6 +242,7 @@ async def _process_voice_turn(
     # FNOL extraction runs AFTER audio delivered — no longer adds to caller latency
     fnol_data.update(await extractor.extract(fsm.history, call_id))
     transition = fsm.advance(fnol_data)
+    current_state = fsm.state.value
 
     from app.storage.database import AsyncSessionFactory
     from app.storage.call_store import CallStore
@@ -251,9 +261,20 @@ async def _process_voice_turn(
 
     # Fire monitor broadcasts as background tasks — don't block the call handler
     missing = get_missing_required_fields(fnol_data, fnol_data.get("confidence", {}))
-    asyncio.create_task(live_manager.broadcast({"type": "transcript_turn", "call_id": call_id, "turn_index": turn_index * 2, "speaker": "user", "text": result.transcript, "language": fsm.language, "timestamp_ms": timestamp_ms}))
-    asyncio.create_task(live_manager.broadcast({"type": "pipeline_metrics", "call_id": call_id, "turn_index": turn_index, "stt_ms": result.stt_ms, "llm_ms": result.llm_ms, "llm_ttft_ms": result.llm_ttft_ms, "tts_ms": result.tts_ms, "total_ms": result.total_ms, "fallback_triggered": result.fallback_triggered}))
+    asyncio.create_task(live_manager.broadcast({"type": "transcript_turn", "call_id": call_id, "turn_index": turn_index * 2, "speaker": "user", "text": result.transcript, "language": fsm.language, "timestamp_ms": timestamp_ms, "fsm_state": fsm.state.value}))
+    asyncio.create_task(live_manager.broadcast({"type": "pipeline_metrics", "call_id": call_id, "turn_index": turn_index, "stt_ms": result.stt_ms, "llm_ms": result.llm_ms, "llm_ttft_ms": result.llm_ttft_ms, "tts_ms": result.tts_ms, "total_ms": result.total_ms, "stt_provider": result.stt_provider, "llm_provider": result.llm_provider, "tts_provider": result.tts_provider, "fallback_triggered": result.fallback_triggered}))
     asyncio.create_task(live_manager.broadcast({"type": "fnol_update", "call_id": call_id, "fields": fnol_data, "completeness_score": fnol_data.get("completeness_score", 0), "missing_fields": missing}))
+    if settings.FNOL_WEBHOOK_URL and fnol_data.get("completeness_score", 0) >= 0.9 and not fnol_data.get("_webhook_sent"):
+        async def _fire_webhook():
+            payload = {k: v for k, v in fnol_data.items() if not k.startswith("_")}
+            payload["call_id"] = call_id
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    await client.post(settings.FNOL_WEBHOOK_URL, json=payload)
+                fnol_data["_webhook_sent"] = True
+            except Exception as exc:
+                log.warning("fnol_webhook_failed", call_id=call_id, error=str(exc))
+        asyncio.create_task(_fire_webhook())
     if transition:
         asyncio.create_task(live_manager.broadcast({"type": "fsm_transition", "call_id": call_id, "from_state": transition.from_state, "to_state": transition.to_state, "trigger": transition.trigger}))
 

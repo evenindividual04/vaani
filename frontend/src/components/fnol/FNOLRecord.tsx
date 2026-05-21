@@ -37,6 +37,7 @@ export function CompletenessBar({ score, missingFields = [] }: CompletenessBarPr
       </div>
 
       {/* Missing fields */}
+      {missingFields.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {missingFields.map((f) => (
             <span
