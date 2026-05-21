@@ -23,14 +23,15 @@ class STTResult:
 
 class SarvamSTT:
     def __init__(self) -> None:
-        from sarvamai import SarvamAI
+        from sarvamai import AsyncSarvamAI
 
-        self.client = SarvamAI(api_subscription_key=settings.SARVAM_API_KEY)
+        self.async_client = AsyncSarvamAI(api_subscription_key=settings.SARVAM_API_KEY)
         self.circuit_breaker = CircuitBreaker(
             name="sarvam_stt",
             error_threshold=settings.CB_ERROR_THRESHOLD,
             cooldown_seconds=settings.CB_COOLDOWN_SECONDS,
             disable_threshold=settings.CB_DISABLE_THRESHOLD,
+            recovery_seconds=settings.CB_RECOVERY_SECONDS,
         )
 
     async def transcribe(
@@ -48,7 +49,7 @@ class SarvamSTT:
             audio_io = io.BytesIO(audio_wav)
             audio_io.name = "audio.wav"
 
-            response = self.client.speech_to_text.transcribe(
+            response = await self.async_client.speech_to_text.transcribe(
                 file=audio_io,
                 model=settings.SARVAM_STT_MODEL,
                 language_code=language_code,

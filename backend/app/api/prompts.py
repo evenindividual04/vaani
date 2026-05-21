@@ -1,17 +1,18 @@
 """Prompts API — CRUD, deploy, rollback, diff per §6."""
-from __future__ import annotations
-
 import difflib
 from datetime import datetime
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._limiter import limiter
 from app.api.auth import require_scope
+from app.config import settings
+from app.domain.prompts.loader import _loader
 from app.storage.audit_log import AuditLogger
 from app.storage.database import get_db
 from app.storage.models import PromptVersion
@@ -136,7 +137,9 @@ async def get_prompt(
 
 
 @router.post("/{version_id}/deploy")
+@limiter.limit(settings.RATE_LIMIT_API)
 async def deploy_prompt(
+    request: Request,
     version_id: str,
     body: DeployRequest,
     db: AsyncSession = Depends(get_db),
@@ -152,6 +155,7 @@ async def deploy_prompt(
     await db.execute(update(PromptVersion).values(is_active=False))
     pv.is_active = True
     await db.commit()
+    _loader.invalidate_cache()
 
     audit = AuditLogger(db)
     await audit.log(
@@ -165,7 +169,9 @@ async def deploy_prompt(
 
 
 @router.post("/{version_id}/rollback")
+@limiter.limit(settings.RATE_LIMIT_API)
 async def rollback_prompt(
+    request: Request,
     version_id: str,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_scope("admin")),
@@ -182,6 +188,7 @@ async def rollback_prompt(
     await db.execute(update(PromptVersion).values(is_active=False))
     target.is_active = True
     await db.commit()
+    _loader.invalidate_cache()
 
     audit = AuditLogger(db)
     await audit.log(

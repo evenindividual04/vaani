@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import structlog
 
+from app.config import settings
 from app.pipeline.llm import LLMResult, LLMRouter
 from app.pipeline.metrics import record_pipeline_turn
 from app.pipeline.stt import STTResult, SarvamSTT
@@ -143,6 +144,107 @@ class PipelineOrchestrator:
             stt_provider=stt_provider,
             llm_provider=llm_result.provider,
             llm_model=llm_result.model,
+            tts_provider=tts_provider,
+            language=detected_language,
+        )
+
+    async def run_turn_streaming(
+        self,
+        audio_wav: bytes | None,
+        text_input: str | None,
+        conversation_history: list[dict],
+        call_id: str,
+        language: str,
+        system_prompt: str,
+        channel: str = "web",
+    ):
+        """
+        Streaming STT → LLM → TTS pipeline.
+
+        Yields bytes (audio chunks) as each sentence's TTS completes, then
+        yields a final PipelineTurnResult with all metrics. This gets first
+        audio to the caller ~(LLM TTFT + one sentence TTS) earlier than batch.
+        """
+        start = time.perf_counter()
+
+        # STT is inherently batch
+        transcript = text_input or ""
+        stt_ms = 0.0
+        stt_provider = "none"
+        detected_language = language
+
+        if audio_wav is not None:
+            stt_result: STTResult = await self.stt.transcribe(
+                audio_wav, language, channel, call_id
+            )
+            transcript = stt_result.transcript
+            stt_ms = stt_result.latency_ms
+            stt_provider = "sarvam"
+            detected_language = stt_result.language_code
+
+        messages = _build_messages(conversation_history, transcript, system_prompt)
+
+        sentences: list[str] = []
+        audio_chunks: list[bytes] = []
+        tts_ms = 0.0
+        tts_provider = "none"
+        llm_start = time.perf_counter()
+
+        if audio_wav is not None:
+            async for sentence in self.llm.stream_sentences(messages, call_id):
+                sentences.append(sentence)
+                tts_chunk_start = time.perf_counter()
+                chunk = await self.tts.synthesize_one_async(sentence, detected_language)
+                tts_ms += (time.perf_counter() - tts_chunk_start) * 1000
+                audio_chunks.append(chunk)
+                tts_provider = "sarvam"
+                yield chunk
+        else:
+            llm_result = await self.llm.complete(messages, call_id, "conversation")
+            sentences = [llm_result.text]
+
+        llm_ms = (time.perf_counter() - llm_start) * 1000
+        total_ms = (time.perf_counter() - start) * 1000
+        response_text = " ".join(sentences)
+
+        record_pipeline_turn(
+            channel=channel,
+            language=detected_language,
+            stt_ms=stt_ms,
+            llm_ms=llm_ms,
+            llm_ttft_ms=0.0,  # not tracked per-token in streaming path
+            tts_ms=tts_ms,
+            total_ms=total_ms,
+            stt_provider=stt_provider,
+            llm_provider="groq",
+            llm_model=settings.GROQ_MODEL,
+            tts_provider=tts_provider,
+            fallback_triggered=False,
+        )
+
+        log.info(
+            "pipeline_streaming_complete",
+            call_id=call_id,
+            sentences=len(sentences),
+            stt_ms=round(stt_ms, 1),
+            llm_ms=round(llm_ms, 1),
+            tts_ms=round(tts_ms, 1),
+            total_ms=round(total_ms, 1),
+        )
+
+        yield PipelineTurnResult(
+            transcript=transcript,
+            response_text=response_text,
+            audio_chunks=audio_chunks,
+            stt_ms=stt_ms,
+            llm_ms=llm_ms,
+            llm_ttft_ms=0.0,
+            tts_ms=tts_ms,
+            total_ms=total_ms,
+            fallback_triggered=False,
+            stt_provider=stt_provider,
+            llm_provider="groq",
+            llm_model=settings.GROQ_MODEL,
             tts_provider=tts_provider,
             language=detected_language,
         )

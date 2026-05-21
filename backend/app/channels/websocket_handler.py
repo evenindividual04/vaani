@@ -18,7 +18,7 @@ from app.domain.prompts.loader import get_prompt
 from app.domain.validator import get_missing_required_fields
 from app.pipeline.audio import AudioBuffer
 from app.pipeline.metrics import ACTIVE_CALLS, CALLS_TOTAL, FNOL_COMPLETENESS
-from app.pipeline.orchestrator import PipelineOrchestrator
+from app.pipeline.orchestrator import PipelineOrchestrator, PipelineTurnResult
 from app.pipeline.vad import SileroVAD
 
 log = structlog.get_logger()
@@ -192,7 +192,11 @@ async def _process_voice_turn(
     wav_bytes, call_id, call_start, turn_index, fnol_data, channel,
 ):
     system_prompt = get_prompt(fsm.current_prompt_key, settings.ACTIVE_PROMPT_VERSION, fsm.language)
-    result = await orchestrator.run_turn(
+
+    # Stream audio to client as each sentence's TTS completes (TTFT fix).
+    # The final yielded item is the PipelineTurnResult with metrics.
+    result: PipelineTurnResult | None = None
+    async for item in orchestrator.run_turn_streaming(
         audio_wav=wav_bytes,
         text_input=None,
         conversation_history=fsm.history,
@@ -200,21 +204,36 @@ async def _process_voice_turn(
         language=fsm.language,
         system_prompt=system_prompt,
         channel=channel,
-    )
+    ):
+        if isinstance(item, bytes):
+            await ws.send_json({
+                "type": "agent_audio",
+                "call_id": call_id,
+                "audio_b64": base64.b64encode(item).decode(),
+                "turn_index": turn_index,
+            })
+        else:
+            result = item
 
-    # Update language
+    if result is None:
+        return
+
     fsm.language = lang_tracker.update(result.language, result.transcript)
-
-    # Update FSM
     fsm.add_turn("user", result.transcript)
     fsm.add_turn("agent", result.response_text)
     timestamp_ms = int((time.time() - call_start) * 1000)
 
-    # Extract FNOL
+    await ws.send_json({
+        "type": "agent_text",
+        "call_id": call_id,
+        "text": result.response_text,
+        "turn_index": turn_index,
+    })
+
+    # FNOL extraction runs AFTER audio delivered — no longer adds to caller latency
     fnol_data.update(await extractor.extract(fsm.history, call_id))
     transition = fsm.advance(fnol_data)
 
-    # Persist to DB
     from app.storage.database import AsyncSessionFactory
     from app.storage.call_store import CallStore
     async with AsyncSessionFactory() as session:
@@ -230,29 +249,13 @@ async def _process_voice_turn(
             tts_provider=result.tts_provider, fallback_triggered=result.fallback_triggered,
         )
 
-    # Send audio chunks back
-    for chunk in result.audio_chunks:
-        await ws.send_json({
-            "type": "agent_audio",
-            "call_id": call_id,
-            "audio_b64": base64.b64encode(chunk).decode(),
-            "turn_index": turn_index,
-        })
-
-    await ws.send_json({
-        "type": "agent_text",
-        "call_id": call_id,
-        "text": result.response_text,
-        "turn_index": turn_index,
-    })
-
-    # Broadcast to live monitors
+    # Fire monitor broadcasts as background tasks — don't block the call handler
     missing = get_missing_required_fields(fnol_data, fnol_data.get("confidence", {}))
-    await live_manager.broadcast({"type": "transcript_turn", "call_id": call_id, "turn_index": turn_index * 2, "speaker": "user", "text": result.transcript, "language": fsm.language, "timestamp_ms": timestamp_ms})
-    await live_manager.broadcast({"type": "pipeline_metrics", "call_id": call_id, "turn_index": turn_index, "stt_ms": result.stt_ms, "llm_ms": result.llm_ms, "llm_ttft_ms": result.llm_ttft_ms, "tts_ms": result.tts_ms, "total_ms": result.total_ms, "fallback_triggered": result.fallback_triggered})
-    await live_manager.broadcast({"type": "fnol_update", "call_id": call_id, "fields": fnol_data, "completeness_score": fnol_data.get("completeness_score", 0), "missing_fields": missing})
+    asyncio.create_task(live_manager.broadcast({"type": "transcript_turn", "call_id": call_id, "turn_index": turn_index * 2, "speaker": "user", "text": result.transcript, "language": fsm.language, "timestamp_ms": timestamp_ms}))
+    asyncio.create_task(live_manager.broadcast({"type": "pipeline_metrics", "call_id": call_id, "turn_index": turn_index, "stt_ms": result.stt_ms, "llm_ms": result.llm_ms, "llm_ttft_ms": result.llm_ttft_ms, "tts_ms": result.tts_ms, "total_ms": result.total_ms, "fallback_triggered": result.fallback_triggered}))
+    asyncio.create_task(live_manager.broadcast({"type": "fnol_update", "call_id": call_id, "fields": fnol_data, "completeness_score": fnol_data.get("completeness_score", 0), "missing_fields": missing}))
     if transition:
-        await live_manager.broadcast({"type": "fsm_transition", "call_id": call_id, "from_state": transition.from_state, "to_state": transition.to_state, "trigger": transition.trigger})
+        asyncio.create_task(live_manager.broadcast({"type": "fsm_transition", "call_id": call_id, "from_state": transition.from_state, "to_state": transition.to_state, "trigger": transition.trigger}))
 
 
 async def _process_text_turn(
@@ -271,8 +274,6 @@ async def _process_text_turn(
     )
     fsm.add_turn("user", text)
     fsm.add_turn("agent", result.response_text)
-    fnol_data.update(await extractor.extract(fsm.history, call_id))
-    fsm.advance(fnol_data)
 
     await ws.send_json({
         "type": "agent_text",
@@ -280,6 +281,9 @@ async def _process_text_turn(
         "text": result.response_text,
         "turn_index": turn_index,
     })
+
+    fnol_data.update(await extractor.extract(fsm.history, call_id))
+    fsm.advance(fnol_data)
 
 
 # ── Live monitor WebSocket ────────────────────────────────────────────────────

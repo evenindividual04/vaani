@@ -119,6 +119,6 @@ def test_status_dict_keys():
     d = cb.status_dict()
     assert set(d.keys()) == {
         "name", "state", "consecutive_errors",
-        "cooldown_cycles", "last_error_at", "cooling_until",
+        "cooldown_cycles", "last_error_at", "cooling_until", "disabled_since",
     }
     assert d["state"] == "healthy"

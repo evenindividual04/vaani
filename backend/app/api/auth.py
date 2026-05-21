@@ -1,15 +1,14 @@
 """JWT authentication — login, refresh, revoke, scope enforcement."""
-from __future__ import annotations
-
 from datetime import datetime, timedelta
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
+from app.api._limiter import limiter
 from app.config import settings
 
 log = structlog.get_logger()
@@ -76,7 +75,8 @@ def require_scope(required: str):
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest):
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def login(request: Request, body: LoginRequest):
     if body.username != settings.ADMIN_USERNAME or body.password != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -90,7 +90,8 @@ async def login(body: LoginRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(user: Annotated[dict, Depends(get_current_user)]):
+@limiter.limit(settings.RATE_LIMIT_AUTH)
+async def refresh(request: Request, user: Annotated[dict, Depends(get_current_user)]):
     token = _create_token(user["sub"], user.get("scopes", []))
     return TokenResponse(
         access_token=token,
@@ -99,7 +100,9 @@ async def refresh(user: Annotated[dict, Depends(get_current_user)]):
 
 
 @router.post("/revoke", status_code=204)
+@limiter.limit(settings.RATE_LIMIT_AUTH)
 async def revoke(
+    request: Request,
     token: Annotated[str, Depends(oauth2_scheme)],
     user: Annotated[dict, Depends(get_current_user)],
 ):
