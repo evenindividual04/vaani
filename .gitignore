@@ -64,6 +64,7 @@ MANIFEST
 # python environments
 .env
 .venv
+.venv*/
 env/
 venv/
 ENV/
@@ -91,3 +92,12 @@ htmlcov/
 # Internal spec/planning docs
 VAANI_COMPLETE_SPEC.md
 vaani-complete-spec-md-*.md
+
+# Session scratch docs (not for repo)
+CODE_CHANGES.md
+COMPLETION_SUMMARY.md
+DEPLOYMENT_GUIDE.md
+IMPLEMENTATION_COMPLETE.md
+INDEX.md
+README_PRODUCTION_READY.md
+VERIFICATION_CHECKLIST.md
